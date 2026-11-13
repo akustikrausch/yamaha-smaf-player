@@ -119,7 +119,7 @@ private:
     // the note nibble carrying a WAVE NUMBER; notes become WaveOn triggers.
     void decodeHandyPhone_(const uint8_t* p, size_t n, int base, double tbDms, double tbGms,
                            bool atrWaveMode = false);
-    void decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms, double tbGms);
+    void decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms, double tbGms, bool ma7 = false);
 
     // resolve a channel's current patch (voice table hit or gm fallback).
     const FmVoicePatch& patchFor_(int ch, int note, bool& isPcmOut) const;
