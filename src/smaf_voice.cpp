@@ -127,6 +127,25 @@ ParsedVoice parseVoiceExclusive(const uint8_t* p, size_t n) {
     if (!p || n < 5) return out;
     if (p[0] != 0x43) return out;   // not a yamaha maker id
 
+    // ma-7 fm voices retain the vm35 globals and first seven bytes of
+    // each operator, followed by three bytes of additional ma-7 controls.
+    if (n >= 14 && p[1] == 0x79 && p[2] == 0x08 && p[3] == 0x7f && p[4] == 0x21) {
+        if (p[10] != 0) return out; // other ma-7 voice types need separate decoders
+        int alg = p[13] & 0x0f;
+        if (alg > 7) return out;
+        int count = opCountFromAlg(alg);
+        if (n < size_t(14 + count * 10)) return out;
+        out.key.bankMSB = p[5]; out.key.bankLSB = p[6]; out.key.pc = p[7];
+        out.key.drumNote = p[8];
+        uint8_t body[3 + 7 * 4] = {};
+        std::copy_n(p + 11, 3, body);
+        for (int i = 0; i < count; ++i)
+            std::copy_n(p + 14 + i * 10, 7, body + 3 + i * 7);
+        applyVm35Body(body, 3 + count * 7, count, out.patch);
+        out.valid = true;
+        return out;
+    }
+
     // MA-3 / MA-5 long form: 43 79 06|07 7F 01 [bank...] body
     if (n >= 11 && p[1] == 0x79 && (p[2] == 0x06 || p[2] == 0x07) && p[3] == 0x7f && p[4] == 0x01) {
         out.key.bankMSB = p[5]; out.key.bankLSB = p[6]; out.key.pc = p[7];

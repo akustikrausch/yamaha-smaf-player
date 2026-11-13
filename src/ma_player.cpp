@@ -134,10 +134,11 @@ bool MaPlayer::init(const SmafFile& file, uint32_t sampleRate) {
 
     for (size_t idx : play) {
         const TrackChunk& t = file.tracks[idx];
-        // handyphone = 4 channels/track, mobile = 16. global channel base keeps
+        // handyphone = 4 channels/track, mobile = 16, ma-7 = 32. the base keeps
         // multi-track files from colliding.
-        int base = (t.formatType == 0x00) ? t.trackNumber * 4 : t.trackNumber * 16;
-        if (base < 0 || base > 112) base = 0;
+        int width = t.formatType == 0x00 ? 4 : t.formatType == 0x03 ? 32 : 16;
+        int base = t.trackNumber * width;
+        if (base < 0 || base + width > 128) base = 0;
         decodeTrack_(t, base);
     }
 
@@ -285,7 +286,7 @@ void MaPlayer::decodeTrack_(const TrackChunk& t, int base) {
         if (!inflated.empty())
             decodeMobile_(inflated.data(), inflated.size(), base, tbD, tbG);
     } else {
-        decodeMobile_(t.sequenceData.data(), t.sequenceData.size(), base, tbD, tbG);
+        decodeMobile_(t.sequenceData.data(), t.sequenceData.size(), base, tbD, tbG, t.formatType == 0x03);
     }
 }
 
@@ -396,13 +397,13 @@ void MaPlayer::decodeHandyPhone_(const uint8_t* p, size_t n, int base, double tb
 }
 
 // ── mobile standard event stream ────────────────────────────────────────────
-void MaPlayer::decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms, double tbGms) {
+void MaPlayer::decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms, double tbGms, bool ma7) {
     const uint8_t* end = p + n;
     double curMs = 0.0;
     auto msToSample = [&](double ms) { return uint64_t(ms * rate_ / 1000.0); };
     // per-channel running velocity: a 0x9n note SETS it, later 0x8n notes REUSE
     // it (spec behaviour; initial value 64).
-    uint8_t runVel[16];
+    uint8_t runVel[32];
     for (auto& v : runVel) v = 64;
     int guard = 0;
     while (p < end && guard++ < 4000000 && events_.size() < kMaxEvents) {
@@ -410,8 +411,16 @@ void MaPlayer::decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms,
         curMs += dur * tbDms;
         if (p >= end) break;
         uint8_t s = *p++;
+        // ma-7 moves the midi class down by 0x80 and uses bit 7 for
+        // channels 16..31. system events retain their f0/ff status bytes.
+        int localCh = s & 0x0f;
+        if (ma7 && s != 0xf0 && s != 0xff) {
+            if ((s & 0x70) == 0x70) break;
+            localCh += (s & 0x80) ? 16 : 0;
+            s = (s & 0x7f) | 0x80;
+        }
         if (s < 0x80) continue;                        // stray data byte
-        int ch = base + (s & 0x0f);
+        int ch = base + localCh;
         uint64_t at = msToSample(curMs);
         switch (s & 0xf0) {
             case 0x80: case 0x90: {                    // note off-vel / on-vel
@@ -421,9 +430,9 @@ void MaPlayer::decodeMobile_(const uint8_t* p, size_t n, int base, double tbDms,
                 if ((s & 0xf0) == 0x90) {
                     if (p >= end) break;
                     vel = *p++;
-                    runVel[s & 0x0f] = uint8_t(vel & 0x7f);   // remember
+                    runVel[localCh] = uint8_t(vel & 0x7f);   // remember
                 } else {
-                    vel = runVel[s & 0x0f];                    // reuse remembered
+                    vel = runVel[localCh];                    // reuse remembered
                 }
                 uint32_t gate = readVlq(p, end);
                 if (gate == 0) break;
@@ -648,7 +657,7 @@ void MaPlayer::fireEvent_(const Ev& e) {
             // a rhythm-channel note with no bound voice gets a percussion hit,
             // never a melodic gm patch (the "drums play piano" class).
             const FmVoicePatch& patch = rv ? rv->patch
-                : (c.rhythm || c.drum) ? FmVoicePatch::drumApprox(e.a)
+                : (c.rhythm || c.drum || c.bankMsb == 0x7d) ? FmVoicePatch::drumApprox(e.a)
                                        : FmVoicePatch::gmApprox(c.program);
             int slot = -1;
             for (int i = 0; i < kPoolSize; ++i) if (!pool_[i].active()) { slot = i; break; }

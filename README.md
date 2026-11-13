@@ -130,6 +130,9 @@ int frames = player.render(buf, 1024);         // pump the synth
   and Mobile (MA-3/5) scores, the huffman-packed variant, custom voices, multi-
   track, pitch bend, volume, pan. **plus embedded PCM voices**: the yamaha-adpcm
   wave bank is decoded and sampled drum / instrument voices play alongside the FM.
+- **ma-7 (format 0x03):** native score events and basic 2-op/4-op fm definitions
+  play. advanced filtered or sampled voices use approximate instruments;
+  embedded ma-7 sample banks and effects are not decoded.
 - **next:** the bulk voice-wave block (`43 79 06 7F 03`) that a few pure drum-kit
   files carry their samples in; and the SD-1-specific higher waveshapes. see
   [ROADMAP.md](ROADMAP.md).
